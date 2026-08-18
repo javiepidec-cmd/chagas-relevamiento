@@ -1,0 +1,20 @@
+{
+  "name": "Chagas - Viviendas - MSP Corrientes",
+  "short_name": "Chagas",
+  "description": "PWA para captura offline de viviendas en operativos entomológicos de Chagas",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1F4A8B",
+  "theme_color": "#1F4A8B",
+  "lang": "es-AR",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
