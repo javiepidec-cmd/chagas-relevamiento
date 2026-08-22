@@ -25,7 +25,7 @@ const CONFIG = {
   // OJO: la URL del backend cambia con el nuevo apps_script_puntos_v3.gs
   // (por hacer). Actualizar cuando esté desplegado.
   endpointSync: "https://script.google.com/macros/s/AKfycby3WVXt7GQCuubD2UeBRfQPD4uktNq8e0_7KF2oqYP3s3jdts-8-OkiVC2bMSwWEScYsA/exec",
-  secret: "AKfycby3WVXt7GQCuubD2UeBRfQPD4uktNq8e0_7KF2oqYP3s3jdts-8-OkiVC2bMSwWEScYsA",
+  secret: "k7pR9xN2mLqW4vJ8sT3yA6bH5cF1eD0zGu",
   dbName: "capturaPuntosPWA",
   dbVersion: 2,
   storeName: "viviendas",
@@ -381,30 +381,44 @@ async function cargarDropdowns() {
   aplicarCache(CONFIG.cacheEspeciesKey,      "otraEspecie",     "-- Ninguna --");
   aplicarCache(CONFIG.cacheInsecticidasKey,  "insecticidaTipo", "-- Ninguno --");
 
-  if (!navigator.onLine) return;
-  if (CONFIG.endpointSync.includes("PEGAR_URL")) return;
+  if (!navigator.onLine) { toast("Dropdowns: sin conexión, uso cache"); return; }
+  if (CONFIG.endpointSync.includes("PEGAR_URL")) { toast("⚠ Falta configurar la URL del backend"); return; }
 
   // 2) refrescar desde el backend en paralelo (no bloquea la UI)
   try {
-    const url = CONFIG.endpointSync + "?action=list_dropdowns";
-    const res = await fetch(url);
-    const json = await res.json();
-    if (!json.ok) return;
+    const url = CONFIG.endpointSync + "?action=list_dropdowns&_ts=" + Date.now();
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) { toast("Dropdowns: HTTP " + res.status); return; }
+    const txt = await res.text();
+    let json;
+    try { json = JSON.parse(txt); }
+    catch (eParse) {
+      toast("Dropdowns: respuesta no es JSON — revisá permisos del deploy");
+      console.error("Respuesta cruda del backend:", txt.substring(0, 500));
+      return;
+    }
+    if (!json.ok) { toast("Dropdowns: " + (json.error || "backend devolvió !ok")); return; }
 
+    let nE = 0, nEs = 0, nI = 0;
     if (Array.isArray(json.estados)) {
       localStorage.setItem(CONFIG.cacheEstadosKey, JSON.stringify(json.estados));
       poblarSelect("estadoVivienda", json.estados, "-- Elegir --");
+      nE = json.estados.length;
     }
     if (Array.isArray(json.especies)) {
       localStorage.setItem(CONFIG.cacheEspeciesKey, JSON.stringify(json.especies));
       poblarSelect("otraEspecie", json.especies, "-- Ninguna --");
+      nEs = json.especies.length;
     }
     if (Array.isArray(json.insecticidas)) {
       localStorage.setItem(CONFIG.cacheInsecticidasKey, JSON.stringify(json.insecticidas));
       poblarSelect("insecticidaTipo", json.insecticidas, "-- Ninguno --");
+      nI = json.insecticidas.length;
     }
+    toast(`Dropdowns OK: ${nE} estados, ${nEs} especies, ${nI} insecticidas`);
   } catch (e) {
-    console.warn("No se pudieron refrescar dropdowns:", e);
+    toast("Dropdowns: " + e.message);
+    console.warn("cargarDropdowns error:", e);
   }
 }
 
@@ -549,13 +563,24 @@ function quitarPuntoDelMapa() {
 }
 
 function detectarUbicacion(lat, lng) {
-  const punto = turf.point([lng, lat]);
-  for (const feat of POLIGONOS.features) {
-    if (turf.booleanPointInPolygon(punto, feat)) {
-      return { depto: feat.properties.depto, muni: feat.properties.muni };
+  try {
+    if (typeof POLIGONOS === "undefined" || !POLIGONOS || !POLIGONOS.features) {
+      console.warn("POLIGONOS no cargó o formato inesperado");
+      return null;
     }
+    const punto = turf.point([lng, lat]);
+    for (const feat of POLIGONOS.features) {
+      try {
+        if (turf.booleanPointInPolygon(punto, feat)) {
+          return { depto: feat.properties.depto, muni: feat.properties.muni };
+        }
+      } catch (eFeat) { /* polígono suelto roto, seguimos con el siguiente */ }
+    }
+    return null;
+  } catch (e) {
+    console.warn("detectarUbicacion falló:", e);
+    return null;
   }
-  return null;
 }
 
 // ==========================================================================
@@ -608,7 +633,8 @@ function procesarFix(lat, lng, precision, fuente) {
     precEl.className = "";
   }
 
-  const detectado = detectarUbicacion(lat, lng);
+  let detectado = null;
+  try { detectado = detectarUbicacion(lat, lng); } catch (e) { console.warn("procesarFix detectarUbicacion:", e); }
   const detectBox = document.getElementById("ubicacionDetectada");
   detectBox.classList.remove("hidden", "fuera-corrientes");
 
@@ -618,13 +644,14 @@ function procesarFix(lat, lng, precision, fuente) {
     ultimoFix = { lat, lng, precision, fuente, ...detectado };
   } else {
     detectBox.classList.add("fuera-corrientes");
-    detectBox.innerHTML = `<div><strong>⚠ Punto fuera de la cobertura de polígonos cargados.</strong></div>
-                           <div style="font-size: 13px; margin-top: 4px;">Se guardará sin depto/municipio automático.</div>`;
+    detectBox.innerHTML = `<div><strong>⚠ Sin detección automática de depto/municipio.</strong></div>
+                           <div style="font-size: 13px; margin-top: 4px;">Se guardará sin esos campos — completalos manualmente en el Sheet si hace falta.</div>`;
     ultimoFix = { lat, lng, precision, fuente, depto: null, muni: null };
   }
 
   document.getElementById("formulario").classList.remove("hidden");
-  setTimeout(() => document.getElementById("nroVivienda").focus(), 200);
+  document.getElementById("formulario").scrollIntoView({ behavior: "smooth", block: "start" });
+  setTimeout(() => document.getElementById("nroVivienda").focus(), 300);
 }
 
 // ==========================================================================
