@@ -2,7 +2,7 @@
 //  SERVICE WORKER  (v6 — Chagas)
 // =========================================================================
 
-const CACHE_VERSION = "captura-v7";
+const CACHE_VERSION = "captura-v10";
 const APP_ASSETS = [
   "./",
   "./index.html",
@@ -10,6 +10,8 @@ const APP_ASSETS = [
   "./poligonos.js",
   "./manifest.json",
   "./icon.svg",
+  "./icon-192.png",
+  "./icon-512.png",
   "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
   "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
   "https://unpkg.com/@turf/turf@6/turf.min.js",
