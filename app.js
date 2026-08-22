@@ -25,7 +25,7 @@ const CONFIG = {
   // OJO: la URL del backend cambia con el nuevo apps_script_puntos_v3.gs
   // (por hacer). Actualizar cuando esté desplegado.
   endpointSync: "https://script.google.com/macros/s/AKfycbx4zfP3nZU3VjT2GIaLUwlVxFTFl3MUvQH3N7yl7IyTjzJO_ZmVlyDWXiDlU31Og-N6DA/exec",
-  secret: "AKfycbxVl3wARAg_nC43LlC2-0gqHIhsgpQ3yUpIR-GQFwKDKKKMhax4ol5m6FdYNs-woLymcg",
+  secret: "AKfycbzFU58ta7j8JZmYgqbVPaNbOJ04chb341IUwQsZ6KZCgs8Hbk4SUBhh_Rda9bGriVdphg",
   dbName: "capturaPuntosPWA",
   dbVersion: 2,
   storeName: "viviendas",
