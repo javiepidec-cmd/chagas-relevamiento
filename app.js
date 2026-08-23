@@ -1242,15 +1242,11 @@ function wireUI() {
   document.getElementById("btnCancelarForm").addEventListener("click", cancelarFormulario);
   document.getElementById("btnSincronizar").addEventListener("click", sincronizar);
 
-  // Foto: cámara + galería con inputs separados
-  const fotoCam = document.getElementById("fotoInputCamara");
-  const fotoGal = document.getElementById("fotoInputGaleria");
-  if (fotoCam) fotoCam.addEventListener("change", () => seleccionarFoto(fotoCam));
-  if (fotoGal) fotoGal.addEventListener("change", () => seleccionarFoto(fotoGal));
-  const btnCam = document.getElementById("btnAdjuntarFotoCamara");
-  const btnGal = document.getElementById("btnAdjuntarFotoGaleria");
-  if (btnCam) btnCam.addEventListener("click", () => fotoCam.click());
-  if (btnGal) btnGal.addEventListener("click", () => fotoGal.click());
+  // Foto (solo desde galería)
+  const fotoInput = document.getElementById("fotoInput");
+  if (fotoInput) fotoInput.addEventListener("change", () => seleccionarFoto(fotoInput));
+  const btnFoto = document.getElementById("btnAdjuntarFoto");
+  if (btnFoto) btnFoto.addEventListener("click", () => fotoInput.click());
   const btnQuitarFoto = document.getElementById("btnQuitarFoto");
   if (btnQuitarFoto) btnQuitarFoto.addEventListener("click", quitarFoto);
 
