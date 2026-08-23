@@ -27,7 +27,7 @@ const CONFIG = {
   endpointSync: "https://script.google.com/macros/s/AKfycby3WVXt7GQCuubD2UeBRfQPD4uktNq8e0_7KF2oqYP3s3jdts-8-OkiVC2bMSwWEScYsA/exec",
   secret: "AKfycby3WVXt7GQCuubD2UeBRfQPD4uktNq8e0_7KF2oqYP3s3jdts-8-OkiVC2bMSwWEScYsA",
   dbName: "capturaPuntosPWA",
-  dbVersion: 2,
+  dbVersion: 3,
   storeName: "viviendas",
   timeoutGps: 30000,
   cacheEstadosKey: "cacheEstadosVivienda",
@@ -53,6 +53,9 @@ let ubicacionOperario = null;
 let sesion = null;
 let operativo = null;                 // { localidad, zona, tEfector, fechaInicio }
 let modoColocacion = false;
+let uuidEditando = null;              // si != null, estamos editando esa vivienda
+let fotoPendiente = null;             // Blob de foto capturada pero aún no guardada
+let filtroMunicipio = true;           // true = solo del municipio actual; false = todas
 
 // ---------- 3. INICIALIZACIÓN ----------
 document.addEventListener("DOMContentLoaded", async () => {
@@ -700,9 +703,21 @@ async function guardarVivienda() {
   const tiHhPdAd = n("tiHhPdAd");
   const tiHhPdN  = n("tiHhPdN");
 
+  // Si estamos editando, mantenemos el uuid original; si es nueva, generamos uno.
+  const esEdicion = !!uuidEditando;
+  const uuid = esEdicion ? uuidEditando : crypto.randomUUID();
+
+  // Si estamos editando, buscamos la vivienda previa para conservar campos
+  // internos (por ejemplo fotoUrl ya subida, fecha original, etc.)
+  let previa = null;
+  if (esEdicion) {
+    const puntos = await listarPuntos();
+    previa = puntos.find(p => p.uuid === uuid) || null;
+  }
+
   const vivienda = {
-    uuid: crypto.randomUUID(),
-    fecha: new Date().toISOString(),
+    uuid: uuid,
+    fecha: previa ? previa.fecha : new Date().toISOString(),
     estado: "pendiente",
 
     // --- Metadata del operativo (snapshot al momento de guardar) ---
@@ -764,18 +779,30 @@ async function guardarVivienda() {
 
     // --- Trazabilidad ---
     opCorreo: sesion.correo,
-    opNombre: sesion.nombre
+    opNombre: sesion.nombre,
+
+    // --- Foto (Blob local para sync, URL final tras subir) ---
+    fotoBlob: fotoPendiente || (previa && previa.fotoBlob) || null,
+    fotoUrl:  (fotoPendiente ? "" : (previa && previa.fotoUrl) || ""),
+
+    // --- Flag interno: si editamos una vivienda que ya estaba sincronizada,
+    // el sync tiene que llamar a update_vivienda en vez de insert_vivienda.
+    _operacion: (previa && previa.estado === "sincronizado") ? "update" : "insert"
   };
 
   await guardarEnDB(vivienda);
-  toast("Vivienda guardada localmente ✓");
+  toast(esEdicion ? "Cambios guardados ✓" : "Vivienda guardada localmente ✓");
 
   limpiarFormulario();
   document.getElementById("formulario").classList.add("hidden");
   document.getElementById("coordBox").classList.add("hidden");
   document.getElementById("ubicacionDetectada").classList.add("hidden");
+  document.getElementById("btnGuardar").innerHTML = "💾 Guardar vivienda";
   quitarPuntoDelMapa();
   ultimoFix = null;
+  uuidEditando = null;
+  fotoPendiente = null;
+  quitarFoto();
 
   await renderizarLista();
   await pintarPuntosGuardados();
@@ -831,15 +858,28 @@ async function sincronizar() {
 
   for (const v of pendientes) {
     try {
-      // Se manda TODO el objeto vivienda; el backend mapea a las columnas de BD.
-      // Se excluyen los campos internos (estado, errorMsg) que solo viven en el cliente.
-      const { estado, errorMsg, fechaSync, ...payload } = v;
+      // 1) Si la vivienda tiene foto local no subida, subimos primero a Drive
+      if (v.fotoBlob && !v.fotoUrl) {
+        try {
+          const url = await subirFotoADrive(v.uuid, v.fotoBlob);
+          v.fotoUrl = url;
+          await guardarEnDB(v);   // persistimos la URL para no reintentar
+        } catch (eFoto) {
+          console.warn("Foto no pudo subirse, sigo con la vivienda:", eFoto);
+          // No frenamos el sync de la vivienda por la foto; queda sin URL
+          // y en el próximo sync se reintenta.
+        }
+      }
 
+      // 2) Enviamos la fila. Excluimos campos internos (Blob no serializa bien y no va al backend)
+      const { estado, errorMsg, fechaSync, fotoBlob, _operacion, ...payload } = v;
+
+      const accion = (_operacion === "update") ? "update_vivienda" : "insert_vivienda";
       const res = await fetch(CONFIG.endpointSync, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify({
-          action: "insert_vivienda",
+          action: accion,
           secret: CONFIG.secret,
           data: payload
         })
@@ -848,6 +888,8 @@ async function sincronizar() {
       if (!json.ok) throw new Error(json.error || "Error del servidor");
       v.estado = "sincronizado";
       v.fechaSync = new Date().toISOString();
+      // Una vez sincronizada, liberamos el Blob de foto para ahorrar espacio en IndexedDB
+      if (v.fotoUrl) v.fotoBlob = null;
       await guardarEnDB(v);
     } catch (e) {
       v.estado = "error";
@@ -861,16 +903,213 @@ async function sincronizar() {
 }
 
 // ==========================================================================
-//                           LISTA DE VIVIENDAS
+//                       FOTO DE LA VIVIENDA
 // ==========================================================================
 
-async function renderizarLista() {
+async function seleccionarFoto(fileInput) {
+  const file = fileInput.files && fileInput.files[0];
+  if (!file) return;
+
+  toast("Comprimiendo foto...");
+  try {
+    const comprimida = await comprimirImagen(file, 1600, 0.75);
+    fotoPendiente = comprimida;
+    mostrarPreviewFoto(comprimida);
+    toast("Foto lista (" + Math.round(comprimida.size / 1024) + " KB)");
+  } catch (e) {
+    toast("Error al procesar la foto: " + e.message);
+    console.error(e);
+  } finally {
+    fileInput.value = "";  // reset para que se pueda re-seleccionar el mismo archivo
+  }
+}
+
+function comprimirImagen(file, maxLado, calidad) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const ratio = Math.min(1, maxLado / Math.max(img.width, img.height));
+        const w = Math.round(img.width * ratio);
+        const h = Math.round(img.height * ratio);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("toBlob null")), "image/jpeg", calidad);
+      };
+      img.onerror = () => reject(new Error("no se pudo cargar la imagen"));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error("no se pudo leer el archivo"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function mostrarPreviewFoto(blob) {
+  const preview = document.getElementById("fotoPreview");
+  const contenedor = document.getElementById("fotoContenedor");
+  if (!preview || !contenedor) return;
+  preview.src = URL.createObjectURL(blob);
+  contenedor.classList.remove("hidden");
+}
+
+function quitarFoto() {
+  fotoPendiente = null;
+  const preview = document.getElementById("fotoPreview");
+  const contenedor = document.getElementById("fotoContenedor");
+  if (preview) { URL.revokeObjectURL(preview.src); preview.src = ""; }
+  if (contenedor) contenedor.classList.add("hidden");
+  toast("Foto eliminada");
+}
+
+function blobABase64(blob) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => {
+      const dataUrl = r.result;
+      const base64 = dataUrl.substring(dataUrl.indexOf(",") + 1);
+      res(base64);
+    };
+    r.onerror = () => rej(r.error);
+    r.readAsDataURL(blob);
+  });
+}
+
+async function subirFotoADrive(uuid, blob) {
+  const base64 = await blobABase64(blob);
+  const res = await fetch(CONFIG.endpointSync, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({
+      action: "upload_foto",
+      secret: CONFIG.secret,
+      data: { uuid: uuid, base64: base64, mimeType: blob.type || "image/jpeg" }
+    })
+  });
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.error || "upload_foto falló");
+  return json.url;
+}
+
+// ==========================================================================
+//                       EDICIÓN DE VIVIENDAS PENDIENTES
+// ==========================================================================
+
+async function abrirVivienda(uuid) {
   const puntos = await listarPuntos();
-  puntos.sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+  const v = puntos.find(p => p.uuid === uuid);
+  if (!v) { toast("Vivienda no encontrada"); return; }
+
+  uuidEditando = uuid;
+  const eraSincronizada = v.estado === "sincronizado";
+
+  // Precargar coordenadas (bloqueadas: el punto ya fue colocado)
+  ultimoFix = { lat: v.lat, lng: v.lng, precision: v.precision, fuente: v.fuente || "editado", depto: v.departamento, muni: v.municipio };
+
+  // Restaurar todos los campos del formulario
+  const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = (val === null || val === undefined) ? "" : val; };
+  setVal("nroVivienda", v.nroVivienda);
+  setVal("apellidoNombres", v.apellidoNombres);
+  setVal("dni", v.dni);
+  setVal("estadoVivienda", v.estadoVivienda);
+  setVal("tiHhIdAd", v.tiHhIdAd);   setVal("tiHhIdN", v.tiHhIdN);
+  setVal("tiHhPdAd", v.tiHhPdAd);   setVal("tiHhPdN", v.tiHhPdN);
+  setVal("otraEspecie", v.otraEspecie);
+  setVal("otraEspId", v.otraEspId); setVal("otraEspPd", v.otraEspPd);
+  setVal("insecticidaTipo", v.insecticidaTipo); setVal("insecticidaCant", v.insecticidaCant);
+  setVal("hab04", v.hab04); setVal("hab519", v.hab519); setVal("habTotal", v.habTotal);
+  setVal("techoColonizable", v.techoColonizable); setVal("paredColonizable", v.paredColonizable);
+  setVal("animPerros", v.animPerros); setVal("animGatos", v.animGatos);
+  setVal("animGallinas", v.animGallinas); setVal("animCabras", v.animCabras);
+  setVal("gallinero", v.gallinero); setVal("corral", v.corral);
+  setVal("otrasEstrAnimal", v.otrasEstrAnimal); setVal("otrasEstrCant", v.otrasEstrCant);
+  setVal("capturaNInsectos", v.capturaNInsectos);
+  setVal("tcruziIdNeg", v.tcruziIdNeg); setVal("tcruziIdPos", v.tcruziIdPos);
+  setVal("tcruziPdNeg", v.tcruziPdNeg); setVal("tcruziPdPos", v.tcruziPdPos);
+
+  // Restaurar foto si había una guardada localmente (Blob) o URL ya subida
+  fotoPendiente = v.fotoBlob || null;
+  if (v.fotoBlob) {
+    mostrarPreviewFoto(v.fotoBlob);
+  } else if (v.fotoUrl) {
+    // Ya se subió a Drive — mostrar aviso, no preview
+    document.getElementById("fotoContenedor").classList.remove("hidden");
+    document.getElementById("fotoPreview").src = v.fotoUrl;
+  } else {
+    quitarFoto();
+  }
+
+  // Mostrar coord box + formulario, cambiar título del botón
+  document.getElementById("coordBox").classList.remove("hidden");
+  document.getElementById("txtLat").textContent = v.lat.toFixed(6);
+  document.getElementById("txtLng").textContent = v.lng.toFixed(6);
+  document.getElementById("txtPrec").textContent = v.precision ? v.precision.toFixed(1) + " m" : "-";
+  document.getElementById("formulario").classList.remove("hidden");
+  document.getElementById("btnGuardar").innerHTML = "💾 Guardar cambios";
+  document.getElementById("formulario").scrollIntoView({ behavior: "smooth" });
+  if (eraSincronizada) {
+    toast("Editando vivienda ya cargada — los cambios sobrescriben la base al sincronizar");
+  } else {
+    toast("Editando vivienda N° " + (v.nroVivienda || ""));
+  }
+}
+
+// ==========================================================================
+//                       FILTRO POR MUNICIPIO ACTUAL
+// ==========================================================================
+
+function municipioActualOperario() {
+  if (!ubicacionOperario) return null;
+  const detectado = detectarUbicacion(ubicacionOperario.lat, ubicacionOperario.lng);
+  return detectado ? detectado.muni : null;
+}
+
+function filtrarPorMunicipio(puntos) {
+  if (!filtroMunicipio) return puntos;
+  const muniActual = municipioActualOperario();
+  if (!muniActual) return puntos;   // sin GPS → no filtramos
+  return puntos.filter(p => p.municipio === muniActual);
+}
+
+function toggleFiltroMunicipio() {
+  filtroMunicipio = !filtroMunicipio;
+  const btn = document.getElementById("btnToggleFiltro");
+  if (btn) btn.textContent = filtroMunicipio ? "🔍 Solo este municipio" : "🌐 Todas";
+  renderizarLista();
+}
+
+
+
+async function renderizarLista() {
+  const todosLosPuntos = await listarPuntos();
+  todosLosPuntos.sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+
+  const puntos = filtrarPorMunicipio(todosLosPuntos);
+  const muniActual = municipioActualOperario();
 
   document.getElementById("contadorPuntos").textContent = puntos.length;
   const ul = document.getElementById("listaPendientes");
   const empty = document.getElementById("sinPuntos");
+  const info = document.getElementById("filtroInfo");
+
+  // Aviso arriba de la lista con el estado del filtro
+  if (info) {
+    if (filtroMunicipio && muniActual) {
+      const oculto = todosLosPuntos.length - puntos.length;
+      info.textContent = oculto > 0
+        ? `Mostrando solo ${muniActual} (${oculto} de otros municipios ocultas)`
+        : `Mostrando solo ${muniActual}`;
+      info.classList.remove("hidden");
+    } else if (filtroMunicipio && !muniActual) {
+      info.textContent = "Sin GPS o fuera de cobertura — mostrando todas";
+      info.classList.remove("hidden");
+    } else {
+      info.textContent = "Mostrando todas las viviendas";
+      info.classList.remove("hidden");
+    }
+  }
 
   if (puntos.length === 0) { ul.innerHTML = ""; empty.style.display = "block"; return; }
   empty.style.display = "none";
@@ -883,15 +1122,19 @@ async function renderizarLista() {
     const resp = p.apellidoNombres ? ` — ${escapeHtml(p.apellidoNombres)}` : "";
     const est  = p.estadoVivienda ? ` · <em>${escapeHtml(p.estadoVivienda)}</em>` : "";
     const loc  = p.municipio ? escapeHtml(p.municipio) : "sin ubicación";
+    const btnEditar = `<button style="width:auto;padding:6px 10px;font-size:12px;background:#eef4ff;color:#1F4A8B;margin-right:4px;" onclick="event.stopPropagation(); abrirVivienda('${p.uuid}')">✏️ Editar</button>`;
     return `
       <li>
-        <div>
+        <div style="flex:1; min-width:0;">
           <span class="status-dot ${dotClass}"></span>
           <strong>${nvi}</strong>${resp}${est}<br>
           <small style="color:#666;">${loc} · ${fecha} · ${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}</small>
         </div>
-        <button style="width:auto;padding:6px 10px;font-size:12px;background:#eee;color:#666;"
-                onclick="eliminarPunto('${p.uuid}')">✕</button>
+        <div style="display:flex; gap:4px; align-items:center;">
+          ${btnEditar}
+          <button style="width:auto;padding:6px 10px;font-size:12px;background:#eee;color:#666;"
+                  onclick="event.stopPropagation(); eliminarPunto('${p.uuid}')">✕</button>
+        </div>
       </li>`;
   }).join("");
 }
@@ -958,6 +1201,18 @@ function wireUI() {
   document.getElementById("btnCancelarForm").addEventListener("click", cancelarFormulario);
   document.getElementById("btnSincronizar").addEventListener("click", sincronizar);
 
+  // Foto
+  const fotoInput = document.getElementById("fotoInput");
+  if (fotoInput) fotoInput.addEventListener("change", () => seleccionarFoto(fotoInput));
+  const btnFoto = document.getElementById("btnAdjuntarFoto");
+  if (btnFoto) btnFoto.addEventListener("click", () => document.getElementById("fotoInput").click());
+  const btnQuitarFoto = document.getElementById("btnQuitarFoto");
+  if (btnQuitarFoto) btnQuitarFoto.addEventListener("click", quitarFoto);
+
+  // Toggle filtro por municipio
+  const btnFiltro = document.getElementById("btnToggleFiltro");
+  if (btnFiltro) btnFiltro.addEventListener("click", toggleFiltroMunicipio);
+
   // Validación en vivo: solo dígitos en inputs numéricos
   ["nroVivienda", "dni",
    "tiHhIdAd", "tiHhIdN", "tiHhPdAd", "tiHhPdN",
@@ -977,3 +1232,4 @@ function wireUI() {
 }
 
 window.eliminarPunto = eliminarPunto;
+window.abrirVivienda = abrirVivienda;
