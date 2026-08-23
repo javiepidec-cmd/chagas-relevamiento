@@ -1,7 +1,7 @@
 {
-  "name": "Chagas - Viviendas - MSP Corrientes",
-  "short_name": "Chagas",
-  "description": "PWA para captura offline de viviendas en operativos entomológicos de Chagas",
+  "name": "SIVET-Chagas — Sistema de Vigilancia Entomológica Territorial",
+  "short_name": "SIVET-Chagas",
+  "description": "Sistema de Vigilancia Entomológica Territorial para operativos de Chagas — MSP Corrientes",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
