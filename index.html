@@ -468,7 +468,10 @@
   <!-- APP PRINCIPAL                                                       -->
   <!-- ================================================================== -->
   <header>
-    <h1>SIVET-Chagas</h1>
+    <div>
+      <h1 style="line-height:1.1;">SIVET-Chagas</h1>
+      <div style="font-size:11px; font-weight:400; opacity:0.85; margin-top:2px;">Sistema de Vigilancia Entomológica Territorial</div>
+    </div>
     <span id="badgeConexion" class="badge offline">Offline</span>
   </header>
 
@@ -721,8 +724,12 @@
           <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
             Una foto por vivienda. Se comprime automáticamente y se sube a Drive al sincronizar.
           </div>
-          <input type="file" id="fotoInput" accept="image/*" class="hidden">
-          <button type="button" id="btnAdjuntarFoto" class="btn-outline">📷 Sacar / Adjuntar foto</button>
+          <input type="file" id="fotoInputCamara" accept="image/*" capture="environment" class="hidden">
+          <input type="file" id="fotoInputGaleria" accept="image/*" class="hidden">
+          <div class="row-botones">
+            <button type="button" id="btnAdjuntarFotoCamara" class="btn-outline">📷 Sacar foto</button>
+            <button type="button" id="btnAdjuntarFotoGaleria" class="btn-outline">🖼️ Galería</button>
+          </div>
           <div id="fotoContenedor" class="hidden" style="margin-top: 10px;">
             <img id="fotoPreview" alt="Vista previa"
                  style="width:100%; max-height:240px; object-fit:cover; border-radius:8px; border:1px solid var(--gris-borde);">
