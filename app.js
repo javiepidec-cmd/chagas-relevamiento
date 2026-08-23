@@ -910,9 +910,9 @@ async function seleccionarFoto(fileInput) {
   const file = fileInput.files && fileInput.files[0];
   if (!file) return;
 
-  toast("Comprimiendo foto...");
+  toast("Comprimiendo foto (" + Math.round(file.size / 1024) + " KB)...");
   try {
-    const comprimida = await comprimirImagen(file, 1600, 0.75);
+    const comprimida = await comprimirImagen(file, 1024, 0.6);
     fotoPendiente = comprimida;
     mostrarPreviewFoto(comprimida);
     toast("Foto lista (" + Math.round(comprimida.size / 1024) + " KB)");
@@ -924,8 +924,49 @@ async function seleccionarFoto(fileInput) {
   }
 }
 
-function comprimirImagen(file, maxLado, calidad) {
-  return new Promise((resolve, reject) => {
+// Comprime una imagen a JPEG. Usa createImageBitmap con resize cuando está
+// disponible (mucho más eficiente en RAM — el navegador puede decodificar
+// y redimensionar en un solo paso sin materializar el bitmap completo).
+// Fallback a Image+canvas para navegadores viejos.
+async function comprimirImagen(file, maxLado, calidad) {
+  // Detectar si el navegador soporta createImageBitmap con opciones de resize
+  const soportaBitmapResize = ("createImageBitmap" in window);
+
+  if (soportaBitmapResize) {
+    try {
+      // Primer paso: obtener dimensiones originales (rápido, sin descomprimir todo)
+      const bmpInicial = await createImageBitmap(file);
+      const w0 = bmpInicial.width, h0 = bmpInicial.height;
+      bmpInicial.close();
+
+      const ratio = Math.min(1, maxLado / Math.max(w0, h0));
+      const w = Math.round(w0 * ratio);
+      const h = Math.round(h0 * ratio);
+
+      // Segundo paso: crear bitmap ya redimensionado (aquí es donde se ahorra RAM)
+      const bmp = await createImageBitmap(file, {
+        resizeWidth: w,
+        resizeHeight: h,
+        resizeQuality: "high"
+      });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext("2d").drawImage(bmp, 0, 0);
+      bmp.close();
+
+      return await new Promise((res, rej) => {
+        canvas.toBlob((blob) => blob ? res(blob) : rej(new Error("toBlob null")), "image/jpeg", calidad);
+      });
+    } catch (e) {
+      console.warn("createImageBitmap falló, fallback a Image+canvas:", e);
+      // sigue al fallback
+    }
+  }
+
+  // Fallback (menos eficiente en RAM)
+  return await new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const img = new Image();
