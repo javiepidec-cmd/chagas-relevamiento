@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
   <meta name="theme-color" content="#1F4A8B">
-  <title>Chagas — Captura de Viviendas v6</title>
+  <title>SIVET-Chagas — MSP Corrientes</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -468,7 +468,7 @@
   <!-- APP PRINCIPAL                                                       -->
   <!-- ================================================================== -->
   <header>
-    <h1>Chagas — Viviendas</h1>
+    <h1>SIVET-Chagas</h1>
     <span id="badgeConexion" class="badge offline">Offline</span>
   </header>
 
@@ -714,6 +714,24 @@
         </div>
       </details>
 
+      <!-- BLOQUE FOTO: al final del formulario -->
+      <details class="bloque">
+        <summary>Foto de la vivienda</summary>
+        <div class="bloque-body">
+          <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
+            Una foto por vivienda. Se comprime automáticamente y se sube a Drive al sincronizar.
+          </div>
+          <input type="file" id="fotoInput" accept="image/*" capture="environment" class="hidden">
+          <button type="button" id="btnAdjuntarFoto" class="btn-outline">📷 Sacar / Adjuntar foto</button>
+          <div id="fotoContenedor" class="hidden" style="margin-top: 10px;">
+            <img id="fotoPreview" alt="Vista previa"
+                 style="width:100%; max-height:240px; object-fit:cover; border-radius:8px; border:1px solid var(--gris-borde);">
+            <button type="button" id="btnQuitarFoto" class="btn-outline"
+                    style="margin-top: 6px; color: var(--rojo); border-color: var(--rojo);">🗑 Quitar foto</button>
+          </div>
+        </div>
+      </details>
+
       <button id="btnGuardar" class="btn-verde" style="margin-top: 10px;">💾 Guardar vivienda</button>
       <button id="btnCancelarForm" class="btn-outline" style="margin-top: 6px;">Cancelar</button>
     </div>
@@ -721,6 +739,10 @@
     <!-- Sección 3: Cola de viviendas guardadas -->
     <div class="card">
       <h2>3. Viviendas guardadas (<span id="contadorPuntos">0</span>)</h2>
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px;">
+        <div id="filtroInfo" style="font-size:12px; color:#555; flex:1;"></div>
+        <button id="btnToggleFiltro" class="btn-outline" style="width:auto; padding:6px 10px; font-size:12px; white-space:nowrap;">🔍 Solo este municipio</button>
+      </div>
       <ul id="listaPendientes" class="lista-pendientes"></ul>
       <div id="sinPuntos" style="color: #888; text-align: center; padding: 20px 0;">
         No hay viviendas guardadas aún.
