@@ -2,7 +2,7 @@
 //  SERVICE WORKER  (v6 — Chagas)
 // =========================================================================
 
-const CACHE_VERSION = "captura-v13";
+const CACHE_VERSION = "captura-v14";
 const APP_ASSETS = [
   "./",
   "./index.html",
@@ -72,4 +72,5 @@ self.addEventListener("fetch", (event) => {
       });
     })
   );
+});
 });
