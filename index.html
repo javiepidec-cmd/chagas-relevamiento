@@ -722,14 +722,11 @@
         <summary>Foto de la vivienda</summary>
         <div class="bloque-body">
           <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
-            Una foto por vivienda. Se comprime automáticamente y se sube a Drive al sincronizar.
+            Una foto por vivienda. Sacala con la cámara del celular y después
+            adjuntala acá. Se comprime automáticamente y se sube a Drive al sincronizar.
           </div>
-          <input type="file" id="fotoInputCamara" accept="image/*" capture="environment" class="hidden">
-          <input type="file" id="fotoInputGaleria" accept="image/*" class="hidden">
-          <div class="row-botones">
-            <button type="button" id="btnAdjuntarFotoCamara" class="btn-outline">📷 Sacar foto</button>
-            <button type="button" id="btnAdjuntarFotoGaleria" class="btn-outline">🖼️ Galería</button>
-          </div>
+          <input type="file" id="fotoInput" accept="image/*" class="hidden">
+          <button type="button" id="btnAdjuntarFoto" class="btn-outline">🖼️ Adjuntar foto</button>
           <div id="fotoContenedor" class="hidden" style="margin-top: 10px;">
             <img id="fotoPreview" alt="Vista previa"
                  style="width:100%; max-height:240px; object-fit:cover; border-radius:8px; border:1px solid var(--gris-borde);">
