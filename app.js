@@ -84,6 +84,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       toast("Conexión recuperada — sincronizando...");
       sincronizar();
       cargarDropdowns();
+      cargarParajesYAnios();
     }
   });
   window.addEventListener("offline", () => {
@@ -239,6 +240,7 @@ function entrarAApp() {
   actualizarChipOperativo();
   renderizarLista();
   cargarDropdowns();
+  cargarParajesYAnios();
   inicializarMapa();
   refrescarUbicacionGps();
   if (navigator.onLine) sincronizar();
@@ -1121,7 +1123,83 @@ function toggleFiltroMunicipio() {
   renderizarLista();
 }
 
+// ==========================================================================
+//                       DESCARGA DE REPORTE PDF
+// ==========================================================================
 
+async function cargarParajesYAnios() {
+  if (!navigator.onLine) return;
+  if (CONFIG.endpointSync.includes("PEGAR_URL")) return;
+  try {
+    const [rp, ra] = await Promise.all([
+      fetch(CONFIG.endpointSync + "?action=list_parajes&_ts=" + Date.now(), { cache: "no-store" }),
+      fetch(CONFIG.endpointSync + "?action=list_anios&_ts=" + Date.now(),   { cache: "no-store" })
+    ]);
+    const jp = await rp.json();
+    const ja = await ra.json();
+
+    const selP = document.getElementById("repParaje");
+    const selA = document.getElementById("repAnio");
+    if (selP && jp.ok) {
+      selP.innerHTML = '<option value="">-- Elegir --</option>' +
+        (jp.parajes || []).map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
+      // Preseleccionar el paraje del operativo activo si coincide
+      if (operativo && operativo.localidad && (jp.parajes || []).includes(operativo.localidad)) {
+        selP.value = operativo.localidad;
+      }
+    }
+    if (selA && ja.ok) {
+      const anios = ja.anios || [];
+      selA.innerHTML = '<option value="">-- Elegir --</option>' +
+        anios.map(a => `<option value="${a}">${a}</option>`).join("");
+      const anioActual = new Date().getFullYear();
+      if (anios.includes(anioActual)) selA.value = anioActual;
+      else if (anios.length > 0) selA.value = anios[0];
+    }
+  } catch (e) {
+    console.warn("cargarParajesYAnios:", e);
+  }
+}
+
+async function generarReportePdf() {
+  if (!navigator.onLine) { toast("Necesitás conexión para generar el reporte"); return; }
+  const paraje = document.getElementById("repParaje").value;
+  const anio   = document.getElementById("repAnio").value;
+  if (!paraje) { toast("Elegí un paraje"); return; }
+  if (!anio)   { toast("Elegí un año"); return; }
+
+  const btn = document.getElementById("btnGenerarPdf");
+  btn.disabled = true;
+  btn.textContent = "⏳ Generando PDF...";
+
+  try {
+    const res = await fetch(CONFIG.endpointSync, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "generar_pdf",
+        secret: CONFIG.secret,
+        data: { paraje: paraje, anio: parseInt(anio, 10) }
+      })
+    });
+    const json = await res.json();
+    if (!json.ok) {
+      if (json.error === "sin_viviendas_para_filtro") {
+        toast("No hay viviendas cargadas para ese paraje y año");
+      } else {
+        toast("Error: " + (json.error || "desconocido"));
+      }
+      return;
+    }
+    toast("PDF generado con " + json.viviendas + " viviendas");
+    window.open(json.url, "_blank");
+  } catch (e) {
+    toast("Error de red: " + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "📄 Generar PDF";
+  }
+}
 
 async function renderizarLista() {
   const todosLosPuntos = await listarPuntos();
@@ -1253,6 +1331,10 @@ function wireUI() {
   // Toggle filtro por municipio
   const btnFiltro = document.getElementById("btnToggleFiltro");
   if (btnFiltro) btnFiltro.addEventListener("click", toggleFiltroMunicipio);
+
+  // Reporte PDF
+  const btnPdf = document.getElementById("btnGenerarPdf");
+  if (btnPdf) btnPdf.addEventListener("click", generarReportePdf);
 
   // Validación en vivo: solo dígitos en inputs numéricos
   ["nroVivienda", "dni",
