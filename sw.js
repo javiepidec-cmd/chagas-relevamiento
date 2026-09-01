@@ -2,7 +2,7 @@
 //  SERVICE WORKER  (v6 — Chagas)
 // =========================================================================
 
-const CACHE_VERSION = "captura-v17";
+const CACHE_VERSION = "captura-v19";
 const APP_ASSETS = [
   "./",
   "./index.html",
