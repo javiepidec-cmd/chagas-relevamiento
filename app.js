@@ -84,7 +84,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       toast("Conexión recuperada — sincronizando...");
       sincronizar();
       cargarDropdowns();
-      cargarParajesYAnios();
     }
   });
   window.addEventListener("offline", () => {
@@ -240,7 +239,6 @@ function entrarAApp() {
   actualizarChipOperativo();
   renderizarLista();
   cargarDropdowns();
-  cargarParajesYAnios();
   inicializarMapa();
   refrescarUbicacionGps();
   if (navigator.onLine) sincronizar();
@@ -1123,84 +1121,6 @@ function toggleFiltroMunicipio() {
   renderizarLista();
 }
 
-// ==========================================================================
-//                       DESCARGA DE REPORTE PDF
-// ==========================================================================
-
-async function cargarParajesYAnios() {
-  if (!navigator.onLine) return;
-  if (CONFIG.endpointSync.includes("PEGAR_URL")) return;
-  try {
-    const [rp, ra] = await Promise.all([
-      fetch(CONFIG.endpointSync + "?action=list_parajes&_ts=" + Date.now(), { cache: "no-store" }),
-      fetch(CONFIG.endpointSync + "?action=list_anios&_ts=" + Date.now(),   { cache: "no-store" })
-    ]);
-    const jp = await rp.json();
-    const ja = await ra.json();
-
-    const selP = document.getElementById("repParaje");
-    const selA = document.getElementById("repAnio");
-    if (selP && jp.ok) {
-      selP.innerHTML = '<option value="">-- Elegir --</option>' +
-        (jp.parajes || []).map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
-      // Preseleccionar el paraje del operativo activo si coincide
-      if (operativo && operativo.localidad && (jp.parajes || []).includes(operativo.localidad)) {
-        selP.value = operativo.localidad;
-      }
-    }
-    if (selA && ja.ok) {
-      const anios = ja.anios || [];
-      selA.innerHTML = '<option value="">-- Elegir --</option>' +
-        anios.map(a => `<option value="${a}">${a}</option>`).join("");
-      const anioActual = new Date().getFullYear();
-      if (anios.includes(anioActual)) selA.value = anioActual;
-      else if (anios.length > 0) selA.value = anios[0];
-    }
-  } catch (e) {
-    console.warn("cargarParajesYAnios:", e);
-  }
-}
-
-async function generarReportePdf() {
-  if (!navigator.onLine) { toast("Necesitás conexión para generar el reporte"); return; }
-  const paraje = document.getElementById("repParaje").value;
-  const anio   = document.getElementById("repAnio").value;
-  if (!paraje) { toast("Elegí un paraje"); return; }
-  if (!anio)   { toast("Elegí un año"); return; }
-
-  const btn = document.getElementById("btnGenerarPdf");
-  btn.disabled = true;
-  btn.textContent = "⏳ Generando PDF...";
-
-  try {
-    const res = await fetch(CONFIG.endpointSync, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({
-        action: "generar_pdf",
-        secret: CONFIG.secret,
-        data: { paraje: paraje, anio: parseInt(anio, 10) }
-      })
-    });
-    const json = await res.json();
-    if (!json.ok) {
-      if (json.error === "sin_viviendas_para_filtro") {
-        toast("No hay viviendas cargadas para ese paraje y año");
-      } else {
-        toast("Error: " + (json.error || "desconocido"));
-      }
-      return;
-    }
-    toast("PDF generado con " + json.viviendas + " viviendas");
-    window.open(json.url, "_blank");
-  } catch (e) {
-    toast("Error de red: " + e.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "📄 Generar PDF";
-  }
-}
-
 async function renderizarLista() {
   const todosLosPuntos = await listarPuntos();
   todosLosPuntos.sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
@@ -1259,11 +1179,49 @@ async function renderizarLista() {
 }
 
 async function eliminarPunto(uuid) {
-  if (!confirm("¿Eliminar esta vivienda de la cola local?")) return;
+  const puntos = await listarPuntos();
+  const v = puntos.find(p => p.uuid === uuid);
+  if (!v) return;
+
+  const yaEnSheet = v.estado === "sincronizado";
+
+  // Confirmación distinta según sea o no una vivienda ya cargada en la base
+  const msg = yaEnSheet
+    ? "Esta vivienda ya está cargada en la base. Se va a marcar como ELIMINADA en el Sheet (queda como registro histórico) y se borra de tu lista local. ¿Continuar?"
+    : "¿Eliminar esta vivienda de la cola local?";
+  if (!confirm(msg)) return;
+
+  // Si está en Sheet, necesitamos conexión para marcarla como eliminada allá.
+  if (yaEnSheet) {
+    if (!navigator.onLine) {
+      toast("Necesitás conexión para eliminar viviendas ya cargadas al servidor");
+      return;
+    }
+    try {
+      const res = await fetch(CONFIG.endpointSync, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: "marcar_eliminada",
+          secret: CONFIG.secret,
+          data: { uuid: uuid }
+        })
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        toast("No se pudo marcar como eliminada: " + (json.error || "desconocido"));
+        return;
+      }
+    } catch (e) {
+      toast("Error de red: " + e.message);
+      return;
+    }
+  }
+
   await borrarPunto(uuid);
   await renderizarLista();
   await pintarPuntosGuardados();
-  toast("Vivienda eliminada");
+  toast(yaEnSheet ? "Vivienda marcada como eliminada ✓" : "Vivienda eliminada");
 }
 
 // ==========================================================================
@@ -1331,10 +1289,6 @@ function wireUI() {
   // Toggle filtro por municipio
   const btnFiltro = document.getElementById("btnToggleFiltro");
   if (btnFiltro) btnFiltro.addEventListener("click", toggleFiltroMunicipio);
-
-  // Reporte PDF
-  const btnPdf = document.getElementById("btnGenerarPdf");
-  if (btnPdf) btnPdf.addEventListener("click", generarReportePdf);
 
   // Validación en vivo: solo dígitos en inputs numéricos
   ["nroVivienda", "dni",
